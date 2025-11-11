@@ -122,7 +122,7 @@ my_dataset/
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.10+
 - PyQt5
 - PyTorch
 - torchvision
@@ -136,5 +136,6 @@ my_dataset/
 - Images are automatically resized to 224x224 pixels
 - Uses Adam optimizer
 - Cross-entropy loss for multiclass classification
+
 
 

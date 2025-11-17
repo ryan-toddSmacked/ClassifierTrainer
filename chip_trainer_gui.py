@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 from pathlib import Path
+from datetime import datetime
 
 # Custom loss functions
 class FocalLoss(nn.Module):
@@ -85,6 +86,9 @@ class TrainingThread(QThread):
         self.augmentation_settings = augmentation_settings
         self.loss_function = loss_function
         self.shuffle_frequency = shuffle_frequency
+        # Periodic save settings (save every N epochs, 0 = disabled)
+        self.save_every_n = 0
+        self.save_output_dir = ""
         # Store trained model and metadata
         self.trained_model = None
         self.model_metadata = {}
@@ -444,6 +448,82 @@ class TrainingThread(QThread):
                 # Update progress
                 progress_value = int(((epoch + 1) / self.epochs) * 100)
                 self.progress.emit(progress_value)
+
+                # Periodic checkpointing and test evaluation (every N epochs)
+                try:
+                    if hasattr(self, 'save_every_n') and self.save_every_n and self.save_output_dir:
+                        if self.save_every_n > 0 and ((epoch + 1) % self.save_every_n) == 0:
+                            # Ensure output directory exists
+                            os.makedirs(self.save_output_dir, exist_ok=True)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            model_fname = os.path.join(self.save_output_dir, f"model_epoch_{epoch+1}_{timestamp}.pth")
+                            # Prepare metadata snapshot
+                            metadata_snapshot = {
+                                'model_architecture': self.model_name,
+                                'classes': full_dataset.classes,
+                                'num_classes': num_classes,
+                                'train_split': self.train_split,
+                                'val_split': self.val_split,
+                                'test_split': self.test_split,
+                                'epoch_saved': epoch + 1,
+                                'optimizer': self.optimizer_name,
+                                'learning_rate': self.learning_rate,
+                                'batch_size': self.batch_size,
+                                'loss_function': self.loss_function,
+                                'scheduler': self.scheduler_name,
+                                'augmentation_settings': self.augmentation_settings
+                            }
+                            # Save checkpoint
+                            torch.save({'epoch': epoch + 1, 'model_state_dict': model.state_dict(), 'metadata': metadata_snapshot}, model_fname)
+
+                            # Run test evaluation on current model state
+                            model.eval()
+                            t_preds = []
+                            t_labels = []
+                            t_probs = []
+                            with torch.no_grad():
+                                for data, targets in test_loader:
+                                    data, targets = data.to(self.device), targets.to(self.device)
+                                    outputs = model(data)
+                                    probs = torch.softmax(outputs, dim=1)
+                                    _, preds = outputs.max(1)
+                                    t_preds.extend(preds.cpu().numpy())
+                                    t_labels.extend(targets.cpu().numpy())
+                                    t_probs.extend(probs.cpu().numpy())
+
+                            # Compute metrics
+                            if len(t_labels) > 0:
+                                test_acc = 100. * (np.array(t_preds) == np.array(t_labels)).sum() / len(t_labels)
+                                cm = confusion_matrix(t_labels, t_preds).tolist()
+                                precision = precision_score(t_labels, t_preds, average='macro', zero_division=0)
+                                recall = recall_score(t_labels, t_preds, average='macro', zero_division=0)
+                                f1 = f1_score(t_labels, t_preds, average='macro', zero_division=0)
+                            else:
+                                test_acc = 0.0
+                                cm = []
+                                precision = recall = f1 = 0.0
+
+                            metrics = {
+                                'epoch': epoch + 1,
+                                'timestamp': timestamp,
+                                'test_accuracy': test_acc,
+                                'precision_macro': precision,
+                                'recall_macro': recall,
+                                'f1_macro': f1,
+                                'confusion_matrix': cm,
+                                'num_test_samples': len(t_labels)
+                            }
+
+                            metrics_fname = os.path.join(self.save_output_dir, f"metrics_epoch_{epoch+1}_{timestamp}.json")
+                            with open(metrics_fname, 'w') as mf:
+                                json.dump(metrics, mf, indent=4)
+
+                            preds_fname = os.path.join(self.save_output_dir, f"preds_epoch_{epoch+1}_{timestamp}.npz")
+                            np.savez(preds_fname, predictions=np.array(t_preds), labels=np.array(t_labels), probabilities=np.array(t_probs))
+
+                            self.log.emit(f"Periodic save: checkpoint and metrics saved for epoch {epoch+1} -> {self.save_output_dir}")
+                except Exception as e:
+                    self.log.emit(f"Error during periodic save at epoch {epoch+1}: {str(e)}")
             
             # Test phase on best model
             if best_val_acc > 0:
@@ -497,7 +577,7 @@ class TrainingThread(QThread):
                 'epochs_trained': epoch + 1 if 'epoch' in locals() else self.epochs,
                 'loss_function': self.loss_function,
                 'scheduler': self.scheduler_name,
-                'augmentation': self.augmentation_level
+                'augmentation': self.augmentation_settings
             }
             
             self.log.emit(f"\nTraining completed! Use 'Export Model' button to save the trained model.")
@@ -681,6 +761,8 @@ class ChipTrainerGUI(QMainWindow):
         
         # Store augmentation settings
         self.augmentation_settings = {}
+        # Periodic save output directory (default empty)
+        self.save_output_dir = ""
         
         # Loss function
         params_layout.addWidget(QLabel("Loss Function:"), 3, 2)
@@ -702,6 +784,25 @@ class ChipTrainerGUI(QMainWindow):
         self.shuffle_spin.setSpecialValueText("Never")
         self.shuffle_spin.setToolTip("How often to reshuffle the training data (0 = never, 1 = every epoch)")
         params_layout.addWidget(self.shuffle_spin, 4, 1)
+
+        # Save every N epochs control
+        params_layout.addWidget(QLabel("Save Every N Epochs:"), 5, 0)
+        self.save_every_spin = QSpinBox()
+        self.save_every_spin.setRange(0, 1000)
+        self.save_every_spin.setValue(0)
+        self.save_every_spin.setSpecialValueText("Disabled")
+        self.save_every_spin.setToolTip("Save model and test metrics every N epochs (0 = disabled)")
+        params_layout.addWidget(self.save_every_spin, 5, 1)
+
+        # Save directory selector
+        params_layout.addWidget(QLabel("Save Directory:"), 6, 0)
+        save_dir_layout = QHBoxLayout()
+        self.save_dir_label = QLabel("No save directory selected")
+        self.save_dir_button = QPushButton("Select Save Directory")
+        self.save_dir_button.clicked.connect(self.select_save_directory)
+        save_dir_layout.addWidget(self.save_dir_label)
+        save_dir_layout.addWidget(self.save_dir_button)
+        params_layout.addLayout(save_dir_layout, 6, 1, 1, 3)
         
         layout.addWidget(params_group)
         
@@ -1222,6 +1323,14 @@ class ChipTrainerGUI(QMainWindow):
             self.loss_combo.currentText(),
             self.shuffle_spin.value()
         )
+
+        # Pass periodic save settings to the training thread
+        try:
+            self.training_thread.save_every_n = int(self.save_every_spin.value())
+            self.training_thread.save_output_dir = self.save_output_dir if getattr(self, 'save_output_dir', None) else ""
+        except Exception:
+            # Ignore if not set; training thread has defaults
+            pass
         
         self.training_thread.progress.connect(self.progress_bar.setValue)
         self.training_thread.log.connect(self.log_text.append)
@@ -1229,6 +1338,13 @@ class ChipTrainerGUI(QMainWindow):
         self.training_thread.finished.connect(self.training_finished)
         
         self.training_thread.start()
+
+    def select_save_directory(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Save Directory")
+        if directory:
+            self.save_output_dir = directory
+            self.save_dir_label.setText(directory)
+            self.log_text.append(f"Save directory set to: {directory}")
     
     def update_device_info(self, message):
         """Update device info when training starts"""

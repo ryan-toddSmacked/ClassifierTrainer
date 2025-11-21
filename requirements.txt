@@ -17,3 +17,6 @@ matplotlib
 seaborn
 GPUtil
 
+# Hyperparameter optimization (optional, for smart search)
+optuna
+

@@ -18,7 +18,7 @@ A comprehensive desktop application for training deep learning image classificat
 - **Multiple Optimizers**: Adam, AdamW, SGD (with momentum), RMSprop, Adagrad
 - **Learning Rate Schedulers**: StepLR, ReduceLROnPlateau, CosineAnnealingLR
 - **Loss Functions**: CrossEntropyLoss, NLLLoss, BCELoss
-- **Data Augmentation**: Random horizontal flip, random rotation
+- **Data Augmentation**: Random horizontal flip, random vertical flip, random rotation
 - **Early Stopping**: Configurable patience for validation improvement
 
 ### Evaluation & Metrics
@@ -178,13 +178,94 @@ ChipTrainer automatically detects and uses NVIDIA GPUs if available:
 
 ```
 ChipTrainer/
-├── chip_trainer_gui.py      # Main GUI application
-├── bulk_trainer.py           # CLI batch training script
-├── setup.ps1                 # Windows setup script
-├── setup.sh                  # Linux/Mac setup script
-├── verify_install.py         # Installation verification
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+├── chip_trainer_gui.py           # Main GUI application
+├── train_from_config.py          # CLI training from JSON config
+├── hyperparameter_search.py      # Automated hyperparameter optimization
+├── setup.ps1                      # Windows setup script
+├── setup.sh                       # Linux/Mac setup script
+├── verify_install.py              # Installation verification
+├── requirements.txt               # Python dependencies
+└── README.md                      # This file
+```
+
+## 🔬 CLI Tools
+
+### Training from Configuration File
+
+Run training from a JSON configuration file without the GUI:
+
+```bash
+python train_from_config.py config.json --output ./results
+```
+
+**Export Config from GUI:**
+1. Configure all settings in the GUI
+2. Click **Export Config**
+3. Save as JSON file
+4. Use with CLI training script
+
+**Config Format:**
+The JSON file contains all training parameters including data path, model selection, hyperparameters, advanced options, and multi-metric tracking settings.
+
+### Hyperparameter Search
+
+Automatically search for optimal hyperparameters using three different methods:
+
+```bash
+# Grid Search - Tests all combinations
+python hyperparameter_search.py config.json --method grid --params learning_rate batch_size optimizer
+
+# Random Search - Randomly samples configurations
+python hyperparameter_search.py config.json --method random --params learning_rate batch_size --max-trials 20
+
+# Smart Search - Bayesian optimization with Optuna
+python hyperparameter_search.py config.json --method smart --params learning_rate momentum lr_drop_factor --max-trials 50
+```
+
+**Search Methods:**
+- **Grid Search**: Exhaustively tests all parameter combinations (thorough but slow)
+- **Random Search**: Randomly samples from parameter space (faster, good for exploration)
+- **Smart Search**: Uses Optuna's TPE (Tree-structured Parzen Estimator) for intelligent Bayesian optimization (most efficient)
+
+**Available Parameters:**
+- `learning_rate`: Learning rate values
+- `batch_size`: Batch size options
+- `optimizer`: Optimizer types (adam, adamw, sgd, rmsprop)
+- `weight_decay`: Weight decay values
+- `momentum`: Momentum for SGD
+- `scheduler`: LR scheduler types
+- `lr_drop_factor`: Learning rate drop factor
+- `lr_drop_period`: Epochs between LR drops
+- `hflip`, `vflip`, `rotation`: Data augmentation options
+
+**Output:**
+- Best model(s) saved with rank labels
+- Top 3 models automatically saved at completion
+- Detailed search results in JSON format
+- Optimization history plot (smart search)
+- Metric tracking plots for top 3 models (if tracking enabled)
+- Confusion matrices for top 3 models on test set
+- Complete log file with all trial results
+
+**Smart Search Features:**
+- Intelligent parameter suggestions using TPE algorithm
+- Tracks all trials with metric history
+- Generates optimization history visualization
+- Evaluates top 3 models on full test set
+- Creates confusion matrix heatmaps for each top model
+
+**Example Workflow:**
+```bash
+# 1. Create base config in GUI and export
+# 2. Run smart search to find best hyperparameters
+python hyperparameter_search.py base_config.json --method smart --params learning_rate momentum weight_decay --max-trials 30
+
+# 3. Review results in ./hyperparameter_search_results/
+#    - best_config_smart_*.json (best configuration)
+#    - best_model_smart_trial*_rank1_*.pth (top model)
+#    - optimization_history_*.png (search visualization)
+#    - trial*_rank*_confusion_matrix_*.png (performance analysis)
+#    - Metric tracking plots for top 3 models
 ```
 
 ## 🔧 Requirements
@@ -196,14 +277,8 @@ ChipTrainer/
 - torchmetrics
 - GPUtil (for GPU monitoring)
 - matplotlib (for metric visualization)
+- optuna (for smart hyperparameter search)
 - Other dependencies in `requirements.txt`
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- Report bugs or request features via issues
-- Submit pull requests with improvements
-- Share your training results and use cases
 
 ## 📝 License
 
@@ -220,9 +295,11 @@ This project is open source and available under the MIT License.
 - **Start small**: Test with a small data subset before full training
 - **Monitor GPU**: Keep an eye on memory usage to avoid OOM errors
 - **Experiment**: Try different architectures and hyperparameters
+- **Use hyperparameter search**: Let smart search find optimal settings automatically
 - **Track metrics**: Enable multi-metric tracking to understand model behavior
 - **Use checkpoints**: Save models regularly to avoid losing progress
 - **Validate splits**: Ensure your data splits sum to 1.0 before training
+- **Review confusion matrices**: Check test set confusion matrices to identify misclassification patterns
 
 ## 🐛 Troubleshooting
 

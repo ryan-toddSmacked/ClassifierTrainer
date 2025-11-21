@@ -1,172 +1,202 @@
-#!/bin/bash
-# ChipTrainer Setup Script for Linux
-# This script sets up the Python environment and installs PyTorch with appropriate CUDA support
+#!/usr/bin/env bash
+# setup.sh - Prepares the Python environment for ChipTrainer on Linux
 
-set -e  # Exit on error
+# --- Configuration ---
+REQUIRED_PYTHON_VERSION="3.10"
+VENV_DIR=".venv"
+# Supported CUDA versions and their corresponding PyTorch wheel identifiers
+declare -A SUPPORTED_CUDA_VERSIONS=(
+    ["12.6"]="cu126"
+    ["12.8"]="cu128"
+    ["13.0"]="cu130"
+)
 
-echo "============================================"
-echo "ChipTrainer Setup Script"
-echo "============================================"
-echo ""
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
 
-# Check if Python 3 is installed
-echo "Checking Python installation..."
-if ! command -v python3 &> /dev/null; then
-    echo "ERROR: Python 3 is not installed"
-    echo "Please install Python 3.10 or higher using your package manager"
-    echo "  Ubuntu/Debian: sudo apt install python3.10 python3.10-venv"
-    echo "  Fedora: sudo dnf install python3.10"
-    echo "  Arch: sudo pacman -S python"
-    exit 1
-fi
-
-# Get Python version
-PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-echo "Found Python version: $PYTHON_VERSION"
-
-# Extract major and minor version
-PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-
-# Check if Python version is 3.10 or higher
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
-    echo "ERROR: Python 3.10 or higher is required"
-    echo "Current version: $PYTHON_VERSION"
-    exit 1
-fi
-
-echo "Python version check passed!"
-echo ""
-
-# Create virtual environment
-echo "Creating virtual environment..."
-if [ -d ".venv" ]; then
-    echo "Virtual environment already exists, skipping creation"
-else
-    python3 -m venv .venv
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to create virtual environment"
-        echo "You may need to install python3-venv:"
-        echo "  Ubuntu/Debian: sudo apt install python3-venv"
-        exit 1
-    fi
-    echo "Virtual environment created successfully"
-fi
-echo ""
-
-# Activate virtual environment
-echo "Activating virtual environment..."
-source .venv/bin/activate
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to activate virtual environment"
-    exit 1
-fi
-echo ""
-
-# Upgrade pip
-echo "Upgrading pip..."
-python -m pip install --upgrade pip
-echo ""
-
-# Check for NVIDIA GPU
-echo "Checking for NVIDIA GPU..."
-if command -v nvidia-smi &> /dev/null; then
-    nvidia-smi &> /dev/null
-    if [ $? -eq 0 ]; then
-        echo "NVIDIA GPU detected!"
-        echo ""
-        
-        # Get NVIDIA driver version
-        DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1)
-        echo "NVIDIA Driver Version: $DRIVER_VERSION"
-        
-        # Check CUDA toolkit version
-        echo "Checking CUDA Toolkit version..."
-        if command -v nvcc &> /dev/null; then
-            # Get CUDA version from nvcc
-            CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
-            echo "CUDA Toolkit Version: $CUDA_VERSION"
-        else
-            echo "CUDA Toolkit not found via nvcc, checking nvidia-smi..."
-            
-            # Try to get CUDA version from nvidia-smi
-            CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}')
-            if [ -z "$CUDA_VERSION" ]; then
-                echo "Could not detect CUDA version, defaulting to CUDA 12.1"
-                CUDA_VERSION="12.1"
-            else
-                echo "CUDA Version from nvidia-smi: $CUDA_VERSION"
+# --- Helper Functions ---
+function find_python {
+    # Try to find the best Python version available
+    local required_version=$REQUIRED_PYTHON_VERSION
+    local best_python=""
+    local best_version=""
+    
+    # Check for specific python3.x versions (python3.14, python3.13, python3.12, etc.)
+    for minor in {14..6}; do
+        local py_cmd="python3.$minor"
+        if command -v "$py_cmd" &> /dev/null; then
+            local ver=$("$py_cmd" --version 2>&1 | awk '{print $2}')
+            if printf '%s\n' "$required_version" "$ver" | sort -V -C; then
+                if [[ -z "$best_version" ]] || printf '%s\n' "$best_version" "$ver" | sort -V | head -n1 | grep -q "$best_version"; then
+                    best_python="$py_cmd"
+                    best_version="$ver"
+                fi
             fi
         fi
-        
-        # Determine PyTorch CUDA variant based on CUDA version
-        echo ""
-        echo "Determining appropriate PyTorch version..."
-        echo "Supported CUDA versions: 12.6, 12.8, 13.0"
-        
-        # Extract major and minor CUDA version
-        CUDA_MAJOR=$(echo $CUDA_VERSION | cut -d. -f1)
-        CUDA_MINOR=$(echo $CUDA_VERSION | cut -d. -f2)
-        
-        if [ "$CUDA_MAJOR" -eq 13 ]; then
-            echo "Installing PyTorch with CUDA 13.0 support..."
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-        elif [ "$CUDA_MAJOR" -eq 12 ]; then
-            if [ "$CUDA_MINOR" -ge 8 ]; then
-                echo "Installing PyTorch with CUDA 12.8 support..."
-                pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-            elif [ "$CUDA_MINOR" -ge 6 ]; then
-                echo "Installing PyTorch with CUDA 12.6 support..."
-                pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-            else
-                echo "CUDA 12.$CUDA_MINOR detected"
-                echo "PyTorch supports CUDA 12.6, 12.8, and 13.0"
-                echo "Installing PyTorch with CUDA 12.6 support (closest match)..."
-                pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-            fi
+    done
+    
+    # If no specific version found, try generic python3
+    if [[ -z "$best_python" ]] && command -v python3 &> /dev/null; then
+        local ver=$(python3 --version 2>&1 | awk '{print $2}')
+        if printf '%s\n' "$required_version" "$ver" | sort -V -C; then
+            best_python="python3"
+            best_version="$ver"
+        fi
+    fi
+    
+    if [[ -n "$best_python" ]]; then
+        echo "$best_python"
+        return 0
+    else
+        return 1
+    fi
+}
+
+function test_python_version {
+    PYTHON_CMD=$(find_python)
+    if [[ -n "$PYTHON_CMD" ]]; then
+        version_string=$("$PYTHON_CMD" --version 2>&1 | awk '{print $2}')
+        echo -e "${GREEN}Python version $version_string found via $PYTHON_CMD. (OK)${NC}"
+        return 0
+    else
+        echo -e "${RED}Python $REQUIRED_PYTHON_VERSION or newer not found. Please install Python $REQUIRED_PYTHON_VERSION or newer.${NC}"
+        return 1
+    fi
+}
+
+function get_nvidia_gpu {
+    echo "Checking for NVIDIA GPU..."
+    if command -v lspci &> /dev/null; then
+        if lspci | grep -i nvidia &> /dev/null; then
+            gpu_name=$(lspci | grep -i nvidia | grep -i vga | head -n 1 | cut -d':' -f3)
+            echo -e "${GREEN}NVIDIA GPU found:$gpu_name${NC}"
+            return 0
         else
-            echo "CUDA version $CUDA_VERSION detected"
-            echo "PyTorch currently supports CUDA 12.6, 12.8, and 13.0"
-            echo "Installing PyTorch with CUDA 13.0 support (latest)..."
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+            echo -e "${YELLOW}No NVIDIA GPU found.${NC}"
+            return 1
         fi
     else
-        echo "nvidia-smi found but failed to run"
-        echo "Installing PyTorch with CPU support only..."
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        echo -e "${YELLOW}lspci command not found. Cannot check for GPU.${NC}"
+        return 1
+    fi
+}
+
+function get_cuda_version {
+    echo "Checking for CUDA version..."
+    if command -v nvcc &> /dev/null; then
+        nvcc_output=$(nvcc --version 2>&1)
+        if [[ $? -eq 0 ]]; then
+            version=$(echo "$nvcc_output" | grep -oP 'release \K[0-9]+\.[0-9]+')
+            if [[ -n "$version" ]]; then
+                echo -e "${GREEN}CUDA Toolkit version $version found via nvcc.${NC}"
+                echo "$version"
+                return 0
+            fi
+        fi
+    fi
+    echo -e "${YELLOW}nvcc not found or failed. Make sure the NVIDIA CUDA Toolkit is installed and 'nvcc' is in your PATH.${NC}"
+    return 1
+}
+
+# --- Main Script ---
+echo "--- ChipTrainer Environment Setup ---"
+
+# Get the directory where the script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 1. Verify Python
+echo "Step 1: Checking Python version..."
+if ! test_python_version; then
+    echo -e "${RED}Setup cannot continue. Please install the required Python version.${NC}"
+    exit 1
+fi
+
+# 2. Create Virtual Environment
+if [[ -d "$VENV_DIR" ]]; then
+    echo -e "${YELLOW}Step 2: Virtual environment '$VENV_DIR' already exists. Skipping creation.${NC}"
+else
+    echo "Step 2: Creating Python virtual environment in '$VENV_DIR'..."
+    "$PYTHON_CMD" -m venv "$VENV_DIR"
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}Failed to create virtual environment.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Virtual environment created successfully.${NC}"
+fi
+
+# 3. Determine PyTorch version to install (CPU vs GPU)
+PYTORCH_INSTALL_ARGS="torch torchvision"
+PYTORCH_INDEX_URL=""
+
+if get_nvidia_gpu; then
+    cuda_version=$(get_cuda_version)
+    if [[ -n "$cuda_version" ]] && [[ -n "${SUPPORTED_CUDA_VERSIONS[$cuda_version]}" ]]; then
+        cuda_wheel="${SUPPORTED_CUDA_VERSIONS[$cuda_version]}"
+        PYTORCH_INDEX_URL="https://download.pytorch.org/whl/$cuda_wheel"
+        echo -e "${CYAN}Setup will install PyTorch with CUDA $cuda_version support.${NC}"
+    else
+        echo -e "${YELLOW}Supported CUDA version not found. Falling back to CPU-only PyTorch.${NC}"
     fi
 else
-    echo "No NVIDIA GPU detected or nvidia-smi not found"
-    echo "Installing PyTorch with CPU support only..."
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    echo -e "${CYAN}Proceeding with CPU-only PyTorch installation.${NC}"
 fi
 
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to install PyTorch"
+# 4. Install Dependencies
+echo "Step 4: Installing dependencies..."
+
+# Define path to Python executable in the virtual environment
+# Try both python and python3 in venv
+if [[ -f "$SCRIPT_DIR/$VENV_DIR/bin/python" ]]; then
+    PYTHON_EXE="$SCRIPT_DIR/$VENV_DIR/bin/python"
+elif [[ -f "$SCRIPT_DIR/$VENV_DIR/bin/python3" ]]; then
+    PYTHON_EXE="$SCRIPT_DIR/$VENV_DIR/bin/python3"
+else
+    echo -e "${RED}Python executable not found in virtual environment.${NC}"
+    echo "Please ensure the virtual environment was created correctly."
     exit 1
 fi
-echo ""
 
-# Install other requirements
-echo "Installing additional requirements..."
-pip install -r requirements.txt
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to install requirements"
+echo "Upgrading pip..."
+"$PYTHON_EXE" -m pip install --upgrade pip
+
+echo "Installing PyTorch..."
+if [[ -n "$PYTORCH_INDEX_URL" ]]; then
+    "$PYTHON_EXE" -m pip install $PYTORCH_INSTALL_ARGS --index-url "$PYTORCH_INDEX_URL"
+else
+    "$PYTHON_EXE" -m pip install $PYTORCH_INSTALL_ARGS
+fi
+
+if [[ $? -ne 0 ]]; then
+    echo -e "${RED}Failed to install PyTorch.${NC}"
     exit 1
 fi
-echo ""
 
-echo "============================================"
-echo "Installation Complete!"
-echo "============================================"
-echo ""
-echo "To use ChipTrainer:"
-echo "1. Activate the virtual environment:"
-echo "   source .venv/bin/activate"
-echo ""
-echo "2. Run the GUI:"
-echo "   python chip_trainer_gui.py"
-echo ""
-echo "Verifying PyTorch installation..."
-python -c "import torch; print(f'PyTorch Version: {torch.__version__}'); print(f'CUDA Available: {torch.cuda.is_available()}'); print(f'CUDA Version: {torch.version.cuda if torch.cuda.is_available() else \"N/A\"}'); print(f'Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"CPU\"}')"
-echo ""
+echo "Installing packages from requirements.txt..."
+if [[ -f "$SCRIPT_DIR/requirements.txt" ]]; then
+    "$PYTHON_EXE" -m pip install -r "$SCRIPT_DIR/requirements.txt"
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}Failed to install packages from requirements.txt.${NC}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}requirements.txt not found, skipping.${NC}"
+fi
+
+echo -e "${GREEN}All dependencies installed successfully.${NC}"
+
+# 5. Verify Installation
+echo "Step 5: Verifying PyTorch installation..."
+"$PYTHON_EXE" "$SCRIPT_DIR/verify_install.py"
+if [[ $? -ne 0 ]]; then
+    echo -e "${RED}PyTorch installation verification failed. Please check the errors above.${NC}"
+else
+    echo -e "${GREEN}PyTorch installation verified successfully.${NC}"
+fi
+
+echo "--- Setup Complete ---"
+echo "To activate the environment in your terminal, run:"
+echo "source .venv/bin/activate"

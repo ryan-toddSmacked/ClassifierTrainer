@@ -1,0 +1,40 @@
+{
+  "data_path": "",
+  "model_name": "ResNet18",
+  "epochs": 1000,
+  "learning_rate": 0.001,
+  "batch_size": 32,
+  "train_split": 0.49999999999999983,
+  "val_split": 0.25,
+  "test_split": 0.25,
+  "data_subset": "200",
+  "pretrained_model_path": "",
+  "advanced_options": {
+    "solver": "adam",
+    "momentum": 0.9,
+    "weight_decay": 0.0,
+    "loss": "CrossEntropyLoss",
+    "scheduler": "CosineAnnealingLR",
+    "lr_drop_factor": 0.1,
+    "lr_drop_period": 10,
+    "patience": 10,
+    "shuffle": "every-epoch",
+    "metric": "MatthewsCorrCoef",
+    "fscore_beta": 1.0,
+    "hflip": false,
+    "vflip": false,
+    "rotation": false,
+    "checkpoint_enabled": false,
+    "checkpoint_threshold": 0.5,
+    "checkpoint_dir": "",
+    "tracking_enabled": true,
+    "tracking_frequency": 1,
+    "tracked_metrics": [
+      "MatthewsCorrCoef"
+    ],
+    "tracking_fscore_beta": 2.0
+  },
+  "output_dir": "./output",
+  "export_model": true,
+  "export_metrics": true
+}

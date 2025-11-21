@@ -19,6 +19,7 @@ try:
     from torchvision import datasets, transforms, models
     from torch.utils.data import DataLoader, random_split
     TORCH_AVAILABLE = True
+    TORCH_ERROR = None
 except ImportError as e:
     TORCH_AVAILABLE = False
     TORCH_ERROR = str(e)
@@ -135,24 +136,28 @@ class AdvancedOptionsDialog(QDialog):
         self.hflip_check.setChecked(self.options.get("hflip", False))
         aug_misc_layout.addWidget(self.hflip_check, 0, 0)
 
+        self.vflip_check = QCheckBox("Random Vertical Flip")
+        self.vflip_check.setChecked(self.options.get("vflip", False))
+        aug_misc_layout.addWidget(self.vflip_check, 0, 1)
+
         self.rotation_check = QCheckBox("Random Rotation")
         self.rotation_check.setChecked(self.options.get("rotation", False))
-        aug_misc_layout.addWidget(self.rotation_check, 0, 1)
+        aug_misc_layout.addWidget(self.rotation_check, 1, 0)
 
-        aug_misc_layout.addWidget(QLabel("Validation Patience:"), 1, 0)
+        aug_misc_layout.addWidget(QLabel("Validation Patience:"), 2, 0)
         self.patience_spin = QSpinBox()
         self.patience_spin.setRange(0, 100)
         self.patience_spin.setToolTip("Epochs to wait for improvement before stopping. 0 to disable.")
         self.patience_spin.setValue(self.options.get("patience", 0))
-        aug_misc_layout.addWidget(self.patience_spin, 1, 1)
+        aug_misc_layout.addWidget(self.patience_spin, 2, 1)
 
-        aug_misc_layout.addWidget(QLabel("Shuffle Data:"), 2, 0)
+        aug_misc_layout.addWidget(QLabel("Shuffle Data:"), 3, 0)
         self.shuffle_combo = QComboBox()
         self.shuffle_combo.addItems(["every-epoch", "once"])
         self.shuffle_combo.setCurrentText(self.options.get("shuffle", "every-epoch"))
-        aug_misc_layout.addWidget(self.shuffle_combo, 2, 1)
+        aug_misc_layout.addWidget(self.shuffle_combo, 3, 1)
 
-        aug_misc_layout.addWidget(QLabel("Evaluation Metric:"), 3, 0)
+        aug_misc_layout.addWidget(QLabel("Evaluation Metric:"), 4, 0)
         self.metric_combo = QComboBox()
         
         # Populate with available metrics
@@ -168,7 +173,7 @@ class AdvancedOptionsDialog(QDialog):
         self.metric_combo.addItems(metrics_list)
         self.metric_combo.setCurrentText(self.options.get("metric", "Accuracy"))
         self.metric_combo.setToolTip("Metric used to evaluate model performance and save checkpoints")
-        aug_misc_layout.addWidget(self.metric_combo, 3, 1)
+        aug_misc_layout.addWidget(self.metric_combo, 4, 1)
 
         self.beta_label = QLabel("F-Score Beta:")
         self.beta_spin = QDoubleSpinBox()
@@ -177,8 +182,8 @@ class AdvancedOptionsDialog(QDialog):
         self.beta_spin.setSingleStep(0.1)
         self.beta_spin.setValue(self.options.get("fscore_beta", 1.0))
         self.beta_spin.setToolTip("Beta parameter for F-Score (beta=1 is F1, beta=2 is F2, etc.)")
-        aug_misc_layout.addWidget(self.beta_label, 4, 0)
-        aug_misc_layout.addWidget(self.beta_spin, 4, 1)
+        aug_misc_layout.addWidget(self.beta_label, 5, 0)
+        aug_misc_layout.addWidget(self.beta_spin, 5, 1)
         
         self.layout.addWidget(aug_misc_group, 2, 0, 1, 2)
 
@@ -358,6 +363,7 @@ class AdvancedOptionsDialog(QDialog):
         self.options["metric"] = self.metric_combo.currentText()
         self.options["fscore_beta"] = self.beta_spin.value()
         self.options["hflip"] = self.hflip_check.isChecked()
+        self.options["vflip"] = self.vflip_check.isChecked()
         self.options["rotation"] = self.rotation_check.isChecked()
         self.options["checkpoint_enabled"] = self.checkpoint_enabled.isChecked()
         self.options["checkpoint_threshold"] = self.checkpoint_threshold_spin.value()
@@ -386,6 +392,7 @@ class AdvancedOptionsDialog(QDialog):
             "metric": "Accuracy",
             "fscore_beta": 1.0,
             "hflip": False,
+            "vflip": False,
             "rotation": False,
             "checkpoint_enabled": False,
             "checkpoint_threshold": 0.5,
@@ -533,6 +540,9 @@ class TrainingThread(QThread):
             if self.advanced_options.get("hflip", False):
                 transforms_list.append(transforms.RandomHorizontalFlip())
                 self.log.emit("Using random horizontal flips.")
+            if self.advanced_options.get("vflip", False):
+                transforms_list.append(transforms.RandomVerticalFlip())
+                self.log.emit("Using random vertical flips.")
             if self.advanced_options.get("rotation", False):
                 transforms_list.append(transforms.RandomRotation(10))
                 self.log.emit("Using random rotations.")
@@ -1113,10 +1123,15 @@ class ChipTrainerGUI(QMainWindow):
         self.export_metrics_button.clicked.connect(self.export_metric_history)
         self.export_metrics_button.setEnabled(False)
         
+        self.export_config_button = QPushButton("Export Config")
+        self.export_config_button.clicked.connect(self.export_config)
+        self.export_config_button.setToolTip("Export current settings to JSON configuration file")
+        
         controls_layout.addWidget(self.train_button)
         controls_layout.addWidget(self.stop_button)
         controls_layout.addWidget(self.export_button)
         controls_layout.addWidget(self.export_metrics_button)
+        controls_layout.addWidget(self.export_config_button)
         main_layout.addWidget(controls_group)
 
         # --- Log and Progress ---
@@ -1391,6 +1406,60 @@ class ChipTrainerGUI(QMainWindow):
         except Exception as e:
             self.log_text.append(f"Failed to export metric history: {e}")
             QMessageBox.warning(self, "Export Error", f"Failed to export metric history:\n{e}")
+
+    def export_config(self):
+        """Export current GUI settings to a JSON configuration file."""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"training_config_{timestamp}.json"
+            
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Configuration",
+                default_filename,
+                "JSON Files (*.json)"
+            )
+            
+            if not filename:
+                return
+            
+            # Build configuration dictionary
+            config = {
+                # Required fields
+                "data_path": self.data_path if self.data_path else "/path/to/your/dataset",
+                "model_name": self.model_combo.currentText(),
+                "epochs": self.epochs_spin.value(),
+                "learning_rate": self.lr_spin.value(),
+                "batch_size": self.batch_spin.value(),
+                
+                # Data configuration
+                "train_split": self.train_split_spin.value(),
+                "val_split": self.val_split_spin.value(),
+                "test_split": self.test_split_spin.value(),
+                "data_subset": self.data_subset_input.text().strip(),
+                
+                # Model loading
+                "pretrained_model_path": self.loaded_model_path,
+                
+                # Advanced options
+                "advanced_options": self.advanced_options.copy(),
+                
+                # Output configuration
+                "output_dir": "./output",
+                "export_model": True,
+                "export_metrics": True
+            }
+            
+            # Save configuration
+            with open(filename, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            self.log_text.append(f"Configuration exported to: {filename}")
+            QMessageBox.information(self, "Success", f"Configuration saved to:\n{filename}\n\nYou can use this file with:\npython train_from_config.py {filename}")
+            
+        except Exception as e:
+            self.log_text.append(f"Failed to export configuration: {e}")
+            QMessageBox.warning(self, "Export Error", f"Failed to export configuration:\n{e}")
 
     def generate_metric_plots(self, json_filename):
         """Generate matplotlib figures for each tracked metric."""

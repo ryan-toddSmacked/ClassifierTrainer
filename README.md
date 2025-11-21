@@ -1,141 +1,247 @@
-# ChipTrainer - Neural Network Image Classifier
+# ChipTrainer - PyTorch Image Classification GUI
 
-Train a neural network with PyTorch using a simple Qt5 GUI interface.
+A comprehensive desktop application for training deep learning image classification models with PyTorch. Features a user-friendly interface with advanced training options, multi-metric tracking, model checkpointing, and GPU monitoring.
 
-## Overview
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)
+![PyQt5](https://img.shields.io/badge/GUI-PyQt5-green)
 
-Designed to load images from subfolders whose folder name is the label of those images:
+## ✨ Features
+
+### Core Functionality
+- **30+ Pre-trained Models**: ResNet, VGG, DenseNet, EfficientNet, MobileNet, and more from torchvision
+- **Flexible Data Handling**: Train/validation/test split configuration with data subsetting
+- **Real-time Monitoring**: Live training logs, progress tracking, and GPU statistics
+- **Model Management**: Load pre-trained models, auto-select best from checkpoints, export trained models
+
+### Advanced Training Options
+- **Multiple Optimizers**: Adam, AdamW, SGD (with momentum), RMSprop, Adagrad
+- **Learning Rate Schedulers**: StepLR, ReduceLROnPlateau, CosineAnnealingLR
+- **Loss Functions**: CrossEntropyLoss, NLLLoss, BCELoss
+- **Data Augmentation**: Random horizontal flip, random rotation
+- **Early Stopping**: Configurable patience for validation improvement
+
+### Evaluation & Metrics
+- **12+ Metrics**: Accuracy, Precision, Recall, F-Beta Score (configurable beta), AUROC, AveragePrecision, Specificity, MatthewsCorrCoef, CohenKappa, JaccardIndex, Dice, HammingDistance
+- **Multi-Metric Tracking**: Track multiple metrics simultaneously during training
+- **Confusion Matrix**: Automatic generation on test set
+- **Visualization**: Export matplotlib plots for all tracked metrics
+
+### Smart Checkpointing
+- **Automatic Saving**: Save models when validation metric improves by threshold
+- **Best Model Selection**: Automatically load the best model from a directory
+- **Descriptive Naming**: Models saved with architecture, metric, score, and timestamp
+
+## 🚀 Quick Start
+
+### Automated Setup
+
+**Windows (PowerShell):**
+```powershell
+.\setup.ps1
 ```
-basedir/bananas/img1.png
-basedir/bananas/img2.jpg
-basedir/apples/img3.png
-...
-```
 
-So, every subfolder in basedir is considered to be a label to be trained in a multiclass classifier.
-
-## Features
-
-- **Simple GUI Interface**: Easy-to-use Qt5 interface for training neural networks
-- **Multiple Model Architectures**: 14 pre-trained models (ResNet, VGG, DenseNet, MobileNet, EfficientNet, etc.)
-- **Automatic Class Detection**: Automatically detects classes from subfolder names
-- **Real-time Training Progress**: Live updates showing training progress, loss, and accuracy
-- **Configurable Parameters**: Adjust epochs, learning rate, batch size, optimizers, schedulers, and more
-- **Custom Data Augmentation**: Configure individual augmentation transforms with custom parameters
-- **GPU Support**: Automatically uses CUDA if available with specific GPU detection
-- **Model Export**: Export models in multiple formats (PyTorch .pth, TorchScript .pt, ONNX .onnx)
-- **Statistics Export**: Export comprehensive training statistics and visualizations
-- **Configuration Save/Load**: Save and load training configurations as JSON
-
-## Quick Setup
-
-### Windows
-
-Run the automated setup script:
-```batch
-setup.bat
-```
-
-This will:
-- Check Python version (3.10+ required)
-- Create a virtual environment
-- Detect CUDA GPU and version
-- Install PyTorch with appropriate CUDA support
-- Install all dependencies
-
-### Linux
-
-Run the automated setup script:
+**Linux/Mac:**
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-This will:
-- Check Python version (3.10+ required)
+The setup script will:
+- Verify Python 3.10+ installation
 - Create a virtual environment
-- Detect CUDA GPU and version
-- Install PyTorch with appropriate CUDA support
+- Detect NVIDIA GPU and install appropriate PyTorch version (CUDA or CPU)
 - Install all dependencies
+- Verify the installation
 
-## Manual Installation
+### Manual Setup
 
-If you prefer to install manually:
-
-1. Ensure Python 3.10 or higher is installed
-2. Create a virtual environment:
+1. **Create a virtual environment:**
    ```bash
    python -m venv .venv
    ```
 
-3. Activate the virtual environment:
-   - Windows: `.venv\Scripts\activate`
-   - Linux: `source .venv/bin/activate`
+2. **Activate the environment:**
+   - Windows: `.\.venv\Scripts\Activate.ps1`
+   - Linux/Mac: `source .venv/bin/activate`
 
-4. Install PyTorch (visit https://pytorch.org for the command matching your system)
+3. **Install PyTorch:**
+   Visit [pytorch.org](https://pytorch.org/get-started/locally/) for the appropriate command for your system.
 
-5. Install dependencies:
+4. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
+## 📖 Usage
 
-### Using the GUI
+### Starting the Application
 
-1. Activate the virtual environment (if not already activated):
-   - Windows: `.venv\Scripts\activate`
-   - Linux: `source .venv/bin/activate`
-
-2. Run the application:
-   ```bash
-   python chip_trainer_gui.py
-   ```
-
-3. Select your data directory containing the image subfolders
-4. Configure training parameters:
-   - **Model Architecture**: Choose from 14 pre-trained models
-   - **Epochs**: Number of training iterations (default: 10)
-   - **Learning Rate**: How fast the model learns (default: 0.001)
-   - **Batch Size**: Number of images processed together (default: 32)
-4. Click "Start Training" to begin
-5. Monitor progress in the log area
-6. The trained model will be saved as `trained_model.pth` in the parent directory of your data folder
-
-### Directory Structure Example
-
-```
-my_dataset/
-├── cats/
-│   ├── cat1.jpg
-│   ├── cat2.png
-│   └── cat3.jpg
-├── dogs/
-│   ├── dog1.jpg
-│   ├── dog2.png
-│   └── dog3.jpg
-└── birds/
-    ├── bird1.jpg
-    ├── bird2.png
-    └── bird3.jpg
+```bash
+python chip_trainer_gui.py
 ```
 
-## Requirements
+Or if using the virtual environment:
+- Windows: `.\.venv\Scripts\python.exe chip_trainer_gui.py`
+- Linux/Mac: `./.venv/bin/python chip_trainer_gui.py`
 
-- Python 3.10+
+### Preparing Your Dataset
+
+Organize images in the `ImageFolder` format:
+```
+/path/to/dataset/
+├── class_1/
+│   ├── image1.jpg
+│   ├── image2.png
+│   └── ...
+├── class_2/
+│   ├── image1.jpg
+│   └── ...
+└── class_3/
+    └── ...
+```
+
+### Training Workflow
+
+1. **Select Data Directory**: Choose your dataset folder
+2. **Configure Model**: 
+   - Select from 30+ pre-trained architectures
+   - Optionally load a checkpoint to continue training
+3. **Set Data Split**: Configure train/validation/test proportions (e.g., 0.7/0.2/0.1)
+4. **Adjust Hyperparameters**:
+   - Epochs, learning rate, batch size
+   - Data subset (use portion of dataset or "all")
+5. **Configure Advanced Options** (optional):
+   - Optimizer and weight decay
+   - Learning rate scheduler
+   - Loss function
+   - Data augmentation
+   - Evaluation metric for model selection
+   - Checkpointing settings
+   - Multi-metric tracking
+6. **Start Training**: Monitor progress in real-time
+7. **Export Results**:
+   - Export trained model with auto-generated filename
+   - Export metric history (JSON + matplotlib plots)
+   - View confusion matrix
+
+## 🎯 Advanced Features
+
+### Multi-Metric Tracking
+
+Track multiple evaluation metrics during training without affecting model selection:
+
+1. Open **Advanced Options**
+2. Enable **Multi-Metric Tracking**
+3. Set tracking frequency (every N epochs)
+4. Select metrics to track (e.g., Accuracy, Precision, AUROC, F1-Score)
+5. Configure F-Score beta if needed
+6. After training, click **Export Metrics** to save:
+   - JSON file with all metric values
+   - Individual plots for each metric (train vs validation)
+   - Confusion matrix heatmap (if test set available)
+
+### Model Checkpointing
+
+Automatically save models during training:
+
+1. Enable checkpointing in **Advanced Options**
+2. Set minimum improvement threshold (e.g., 0.5%)
+3. Choose save directory
+4. Models are saved as: `ModelName_epochN_metricScore_timestamp.pth`
+
+### Loading Best Model
+
+Auto-select the best model from a checkpoint directory:
+
+1. Click **Load Best from Directory**
+2. Select folder containing checkpoint files
+3. System parses filenames and loads the highest-scoring model
+
+## 📊 Supported Metrics
+
+- **Classification**: Accuracy, Precision, Recall
+- **F-Score Variants**: F1, F2, F0.5 (configurable beta)
+- **Probabilistic**: AUROC, Average Precision
+- **Specialized**: Specificity, Matthews Correlation Coefficient, Cohen's Kappa
+- **Segmentation-style**: Jaccard Index, Dice Score
+- **Distance**: Hamming Distance
+
+## 🖥️ GPU Support
+
+ChipTrainer automatically detects and uses NVIDIA GPUs if available:
+- Real-time GPU monitoring (utilization, memory, temperature)
+- Automatic CUDA version detection during setup
+- Falls back to CPU if no GPU detected
+
+## 📁 Project Structure
+
+```
+ChipTrainer/
+├── chip_trainer_gui.py      # Main GUI application
+├── bulk_trainer.py           # CLI batch training script
+├── setup.ps1                 # Windows setup script
+├── setup.sh                  # Linux/Mac setup script
+├── verify_install.py         # Installation verification
+├── requirements.txt          # Python dependencies
+└── README.md                 # This file
+```
+
+## 🔧 Requirements
+
+- Python 3.10 or newer
+- PyTorch 2.0+
 - PyQt5
-- PyTorch
 - torchvision
-- Pillow
-- numpy
+- torchmetrics
+- GPUtil (for GPU monitoring)
+- matplotlib (for metric visualization)
+- Other dependencies in `requirements.txt`
 
-## Technical Details
+## 🤝 Contributing
 
-- Uses ResNet-18 as the base model with transfer learning
-- Supports common image formats (JPEG, PNG, etc.)
-- Images are automatically resized to 224x224 pixels
-- Uses Adam optimizer
-- Cross-entropy loss for multiclass classification
+Contributions are welcome! Feel free to:
+- Report bugs or request features via issues
+- Submit pull requests with improvements
+- Share your training results and use cases
 
+## 📝 License
+
+This project is open source and available under the MIT License.
+
+## 🙏 Acknowledgments
+
+- Built with [PyTorch](https://pytorch.org/) and [PyQt5](https://www.riverbankcomputing.com/software/pyqt/)
+- Uses pre-trained models from [torchvision](https://pytorch.org/vision/stable/index.html)
+- Metrics powered by [TorchMetrics](https://torchmetrics.readthedocs.io/)
+
+## 💡 Tips
+
+- **Start small**: Test with a small data subset before full training
+- **Monitor GPU**: Keep an eye on memory usage to avoid OOM errors
+- **Experiment**: Try different architectures and hyperparameters
+- **Track metrics**: Enable multi-metric tracking to understand model behavior
+- **Use checkpoints**: Save models regularly to avoid losing progress
+- **Validate splits**: Ensure your data splits sum to 1.0 before training
+
+## 🐛 Troubleshooting
+
+**CUDA out of memory:**
+- Reduce batch size
+- Use a smaller model architecture
+- Reduce input image size
+
+**Training too slow:**
+- Increase batch size (if GPU memory allows)
+- Use data subset for testing
+- Enable GPU acceleration
+
+**Poor model performance:**
+- Try different optimizers and learning rates
+- Enable data augmentation
+- Use appropriate evaluation metrics
+- Check class balance in dataset
+
+For more help, check the logs in the application window or run `python verify_install.py` to check your setup.
 
 

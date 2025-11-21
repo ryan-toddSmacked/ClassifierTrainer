@@ -144,20 +144,30 @@ class AdvancedOptionsDialog(QDialog):
         self.rotation_check.setChecked(self.options.get("rotation", False))
         aug_misc_layout.addWidget(self.rotation_check, 1, 0)
 
-        aug_misc_layout.addWidget(QLabel("Validation Patience:"), 2, 0)
+        aug_misc_layout.addWidget(QLabel("Class Balance Ratio:"), 2, 0)
+        self.class_balance_spin = QDoubleSpinBox()
+        self.class_balance_spin.setRange(1.0, 100.0)
+        self.class_balance_spin.setDecimals(1)
+        self.class_balance_spin.setSingleStep(0.5)
+        self.class_balance_spin.setValue(self.options.get("class_balance_ratio", 0.0))
+        self.class_balance_spin.setSpecialValueText("Disabled")
+        self.class_balance_spin.setToolTip("Maximum ratio between largest and smallest class (e.g., 2.0 = max 2x difference). Set to 0 or 1 to disable.")
+        aug_misc_layout.addWidget(self.class_balance_spin, 2, 1)
+
+        aug_misc_layout.addWidget(QLabel("Validation Patience:"), 3, 0)
         self.patience_spin = QSpinBox()
         self.patience_spin.setRange(0, 100)
         self.patience_spin.setToolTip("Epochs to wait for improvement before stopping. 0 to disable.")
         self.patience_spin.setValue(self.options.get("patience", 0))
-        aug_misc_layout.addWidget(self.patience_spin, 2, 1)
+        aug_misc_layout.addWidget(self.patience_spin, 3, 1)
 
-        aug_misc_layout.addWidget(QLabel("Shuffle Data:"), 3, 0)
+        aug_misc_layout.addWidget(QLabel("Shuffle Data:"), 4, 0)
         self.shuffle_combo = QComboBox()
         self.shuffle_combo.addItems(["every-epoch", "once"])
         self.shuffle_combo.setCurrentText(self.options.get("shuffle", "every-epoch"))
-        aug_misc_layout.addWidget(self.shuffle_combo, 3, 1)
+        aug_misc_layout.addWidget(self.shuffle_combo, 4, 1)
 
-        aug_misc_layout.addWidget(QLabel("Evaluation Metric:"), 4, 0)
+        aug_misc_layout.addWidget(QLabel("Evaluation Metric:"), 5, 0)
         self.metric_combo = QComboBox()
         
         # Populate with available metrics
@@ -173,7 +183,7 @@ class AdvancedOptionsDialog(QDialog):
         self.metric_combo.addItems(metrics_list)
         self.metric_combo.setCurrentText(self.options.get("metric", "Accuracy"))
         self.metric_combo.setToolTip("Metric used to evaluate model performance and save checkpoints")
-        aug_misc_layout.addWidget(self.metric_combo, 4, 1)
+        aug_misc_layout.addWidget(self.metric_combo, 5, 1)
 
         self.beta_label = QLabel("F-Score Beta:")
         self.beta_spin = QDoubleSpinBox()
@@ -182,8 +192,8 @@ class AdvancedOptionsDialog(QDialog):
         self.beta_spin.setSingleStep(0.1)
         self.beta_spin.setValue(self.options.get("fscore_beta", 1.0))
         self.beta_spin.setToolTip("Beta parameter for F-Score (beta=1 is F1, beta=2 is F2, etc.)")
-        aug_misc_layout.addWidget(self.beta_label, 5, 0)
-        aug_misc_layout.addWidget(self.beta_spin, 5, 1)
+        aug_misc_layout.addWidget(self.beta_label, 6, 0)
+        aug_misc_layout.addWidget(self.beta_spin, 6, 1)
         
         self.layout.addWidget(aug_misc_group, 2, 0, 1, 2)
 
@@ -365,6 +375,7 @@ class AdvancedOptionsDialog(QDialog):
         self.options["hflip"] = self.hflip_check.isChecked()
         self.options["vflip"] = self.vflip_check.isChecked()
         self.options["rotation"] = self.rotation_check.isChecked()
+        self.options["class_balance_ratio"] = self.class_balance_spin.value()
         self.options["checkpoint_enabled"] = self.checkpoint_enabled.isChecked()
         self.options["checkpoint_threshold"] = self.checkpoint_threshold_spin.value()
         if "checkpoint_dir" not in self.options:
@@ -394,6 +405,7 @@ class AdvancedOptionsDialog(QDialog):
             "hflip": False,
             "vflip": False,
             "rotation": False,
+            "class_balance_ratio": 0.0,
             "checkpoint_enabled": False,
             "checkpoint_threshold": 0.5,
             "checkpoint_dir": "",
@@ -523,6 +535,65 @@ class TrainingThread(QThread):
             correct = (all_preds == all_labels).sum().item()
             return 100.0 * correct / len(all_labels)
 
+    def balance_dataset(self, dataset, max_ratio):
+        """Balance dataset classes by undersampling to meet the maximum ratio constraint.
+        
+        Args:
+            dataset: ImageFolder dataset
+            max_ratio: Maximum allowed ratio between largest and smallest class
+            
+        Returns:
+            Balanced dataset (Subset)
+        """
+        from collections import Counter
+        
+        # Get class distribution
+        targets = [label for _, label in dataset.samples]
+        class_counts = Counter(targets)
+        
+        # Find min and max class sizes
+        min_count = min(class_counts.values())
+        max_count = max(class_counts.values())
+        
+        # Calculate target max size based on ratio
+        target_max = int(min_count * max_ratio)
+        
+        # Log current distribution
+        self.log.emit(f"  Current class distribution: {dict(class_counts)}")
+        self.log.emit(f"  Min class size: {min_count}, Max class size: {max_count}, Ratio: {max_count/min_count:.2f}")
+        
+        if max_count / min_count <= max_ratio:
+            self.log.emit(f"  Dataset already balanced within ratio {max_ratio}")
+            return dataset
+        
+        # Select indices for each class
+        balanced_indices = []
+        for class_idx in range(len(dataset.classes)):
+            # Get all indices for this class
+            class_indices = [i for i, (_, label) in enumerate(dataset.samples) if label == class_idx]
+            
+            # Limit to target_max samples
+            if len(class_indices) > target_max:
+                # Random undersample
+                import random
+                random.seed(42)  # For reproducibility
+                class_indices = random.sample(class_indices, target_max)
+            
+            balanced_indices.extend(class_indices)
+        
+        # Create subset with balanced indices
+        balanced_dataset = torch.utils.data.Subset(dataset, balanced_indices)
+        
+        # Log new distribution
+        new_targets = [dataset.samples[i][1] for i in balanced_indices]
+        new_counts = Counter(new_targets)
+        new_min = min(new_counts.values())
+        new_max = max(new_counts.values())
+        self.log.emit(f"  New class distribution: {dict(new_counts)}")
+        self.log.emit(f"  New ratio: {new_max/new_min:.2f}")
+        
+        return balanced_dataset
+
     def run(self):
         try:
             if not TORCH_AVAILABLE:
@@ -558,6 +629,13 @@ class TrainingThread(QThread):
             num_classes = len(full_dataset.classes)
             class_names = full_dataset.classes
             self.log.emit(f"Found {len(full_dataset)} images in {num_classes} classes: {', '.join(class_names)}")
+
+            # Apply class balancing if requested
+            class_balance_ratio = self.advanced_options.get("class_balance_ratio", 0.0)
+            if class_balance_ratio > 1.0:
+                self.log.emit(f"Applying class balancing with max ratio: {class_balance_ratio}")
+                full_dataset = self.balance_dataset(full_dataset, class_balance_ratio)
+                self.log.emit(f"After balancing: {len(full_dataset)} images")
 
             # Subset the dataset if requested
             if self.data_subset != 'all':

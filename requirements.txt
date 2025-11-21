@@ -1,8 +1,19 @@
-PyQt5>=5.15.0
-Pillow>=8.0.0
-numpy>=1.21.0
-onnx>=1.12.0
-onnxscript>=0.1.0
-matplotlib>=3.5.0
-scikit-learn>=1.0.0
-seaborn>=0.11.0
+# GUI Framework
+PyQt5
+
+# ONNX Support for PyTorch
+onnx
+onnxruntime
+
+# PyTorch and related
+torchmetrics
+
+# Other common dependencies (optional but recommended)
+numpy
+pillow
+tqdm
+scikit-learn
+matplotlib
+seaborn
+GPUtil
+

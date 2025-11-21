@@ -86,19 +86,19 @@ function get_nvidia_gpu {
 }
 
 function get_cuda_version {
-    echo "Checking for CUDA version..."
+    echo "Checking for CUDA version..." >&2
     if command -v nvcc &> /dev/null; then
         nvcc_output=$(nvcc --version 2>&1)
         if [[ $? -eq 0 ]]; then
             version=$(echo "$nvcc_output" | grep -oP 'release \K[0-9]+\.[0-9]+')
             if [[ -n "$version" ]]; then
-                echo -e "${GREEN}CUDA Toolkit version $version found via nvcc.${NC}"
+                echo -e "${GREEN}CUDA Toolkit version $version found via nvcc.${NC}" >&2
                 echo "$version"
                 return 0
             fi
         fi
     fi
-    echo -e "${YELLOW}nvcc not found or failed. Make sure the NVIDIA CUDA Toolkit is installed and 'nvcc' is in your PATH.${NC}"
+    echo -e "${YELLOW}nvcc not found or failed. Make sure the NVIDIA CUDA Toolkit is installed and 'nvcc' is in your PATH.${NC}" >&2
     return 1
 }
 

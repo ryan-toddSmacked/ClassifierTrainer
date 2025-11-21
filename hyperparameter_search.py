@@ -12,6 +12,9 @@ import sys
 import os
 import itertools
 import random
+import time
+import threading
+import csv
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
@@ -29,6 +32,104 @@ try:
 except ImportError as e:
     print(f"Error: Failed to import chip_trainer_gui module: {e}")
     sys.exit(1)
+
+# Import torch
+try:
+    import torch
+except ImportError:
+    torch = None
+
+# Try to import GPU monitoring
+try:
+    import GPUtil
+    GPUTIL_AVAILABLE = True
+except ImportError:
+    GPUTIL_AVAILABLE = False
+
+
+def get_gpu_memory_info():
+    """Get GPU memory usage information."""
+    try:
+        if torch is None or not torch.cuda.is_available():
+            return None
+        
+        device = torch.cuda.current_device()
+        allocated = torch.cuda.memory_allocated(device) / (1024**3)  # GB
+        reserved = torch.cuda.memory_reserved(device) / (1024**3)  # GB
+        
+        # Try to get total memory from GPUtil if available
+        total = None
+        if GPUTIL_AVAILABLE:
+            try:
+                gpus = GPUtil.getGPUs()
+                if gpus:
+                    total = gpus[0].memoryTotal / 1024  # Convert MB to GB
+            except:
+                pass
+        
+        if total is None:
+            # Fallback to torch method
+            total = torch.cuda.get_device_properties(device).total_memory / (1024**3)
+        
+        return {
+            'allocated': allocated,
+            'reserved': reserved,
+            'total': total,
+            'free': total - allocated
+        }
+    except Exception as e:
+        return None
+
+
+class GPUMonitorThread(threading.Thread):
+    """Background thread that monitors GPU memory usage and logs to CSV."""
+    
+    def __init__(self, csv_path, interval=2.0):
+        """Initialize GPU monitor thread.
+        
+        Args:
+            csv_path: Path to CSV file for logging
+            interval: Seconds between measurements (default 2.0)
+        """
+        super().__init__(daemon=True)
+        self.csv_path = csv_path
+        self.interval = interval
+        self.stop_flag = threading.Event()
+        
+        # Create CSV file with header
+        try:
+            with open(self.csv_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Memory Total (GB)', 'Memory Used (GB)', 'Memory Free (GB)', 'UTC Posix Time'])
+        except Exception as e:
+            print(f"Warning: Failed to create GPU monitor CSV: {e}")
+    
+    def run(self):
+        """Main thread loop - logs GPU memory every interval seconds."""
+        while not self.stop_flag.is_set():
+            try:
+                gpu_info = get_gpu_memory_info()
+                if gpu_info:
+                    timestamp = time.time()
+                    
+                    with open(self.csv_path, 'a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([
+                            f"{gpu_info['total']:.4f}",
+                            f"{gpu_info['allocated']:.4f}",
+                            f"{gpu_info['free']:.4f}",
+                            f"{timestamp:.6f}"
+                        ])
+            except Exception as e:
+                # Silently ignore errors to avoid disrupting the search
+                pass
+            
+            # Wait for interval or until stop flag is set
+            self.stop_flag.wait(self.interval)
+    
+    def stop(self):
+        """Signal the thread to stop."""
+        self.stop_flag.set()
 
 
 class HyperparameterSearchConfig:
@@ -64,7 +165,7 @@ class HyperparameterSearchConfig:
         elif param_name == 'optimizer':
             return trial.suggest_categorical('optimizer', ['adam', 'adamw', 'sgd', 'rmsprop'])
         elif param_name == 'weight_decay':
-            return trial.suggest_float('weight_decay', 0.0, 0.01, log=True)
+            return trial.suggest_float('weight_decay', 1e-6, 0.01, log=True)
         elif param_name == 'momentum':
             return trial.suggest_float('momentum', 0.9, 0.99)
         elif param_name == 'scheduler':
@@ -310,6 +411,14 @@ def run_search(args):
     logger.log(f"Output Directory: {output_dir}")
     logger.log("=" * 80 + "\n")
     
+    # Start GPU monitoring thread
+    gpu_monitor = None
+    if torch and torch.cuda.is_available():
+        gpu_csv_path = os.path.join(output_dir, f'gpu_memory_log_{timestamp}.csv')
+        gpu_monitor = GPUMonitorThread(gpu_csv_path, interval=2.0)
+        gpu_monitor.start()
+        logger.log(f"GPU memory monitoring started: {gpu_csv_path}\n")
+    
     # Generate search configurations
     if args.method == 'random':
         configs = generate_search_configs(base_config, args.params, 'random', args.max_trials)
@@ -405,12 +514,21 @@ def run_search(args):
             model_path = os.path.join(output_dir, model_filename)
             
             try:
-                import torch
                 torch.save(model.state_dict(), model_path)
                 best_model_path = model_path
                 logger.log(f"  *** NEW BEST MODEL *** Saved to: {model_filename}")
             except Exception as e:
                 logger.log(f"  Error saving model: {e}")
+        
+        # Clean up GPU memory after saving
+        del model, training_thread
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Log GPU memory status
+        gpu_info = get_gpu_memory_info()
+        if gpu_info:
+            logger.log(f"  GPU Memory: {gpu_info['allocated']:.2f}GB allocated, {gpu_info['free']:.2f}GB free (Total: {gpu_info['total']:.2f}GB)")
         
         # Store trial results
         trial_result = {
@@ -482,6 +600,12 @@ def run_search(args):
         
         logger.log(f"Metric tracking plots generated for top {top_n} models")
     
+    # Stop GPU monitoring
+    if gpu_monitor:
+        gpu_monitor.stop()
+        gpu_monitor.join(timeout=5.0)
+        logger.log("\nGPU memory monitoring stopped")
+    
     return 0
 
 
@@ -522,6 +646,14 @@ def run_smart_search(args):
     logger.log(f"Enabled Parameters: {', '.join(args.params)}")
     logger.log(f"Output Directory: {output_dir}")
     logger.log("=" * 80 + "\n")
+    
+    # Start GPU monitoring thread
+    gpu_monitor = None
+    if torch and torch.cuda.is_available():
+        gpu_csv_path = os.path.join(output_dir, f'gpu_memory_log_smart_{timestamp}.csv')
+        gpu_monitor = GPUMonitorThread(gpu_csv_path, interval=2.0)
+        gpu_monitor.start()
+        logger.log(f"GPU memory monitoring started: {gpu_csv_path}\n")
     
     # Track best model globally and all trial results
     best_model_info = {'path': None, 'metric': -float('inf'), 'config': None}
@@ -607,6 +739,9 @@ def run_smart_search(args):
         metric_value = metric_info.get('metric_value', 0.0)
         metric_history = metric_info.get('metric_history', {})
         
+        # Move model to CPU to free GPU memory
+        model = model.cpu()
+        
         # Store trial result with metric history and model
         all_trial_results.append({
             'trial_number': trial_num,
@@ -624,6 +759,16 @@ def run_smart_search(args):
             best_model_info['config'] = config
         
         logger.log_trial(trial_num, args.max_trials, config_to_string(config), metric_value, metric_name)
+        
+        # Clean up GPU memory
+        del training_thread
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Log GPU memory status
+        gpu_info = get_gpu_memory_info()
+        if gpu_info:
+            logger.log(f"  GPU Memory: {gpu_info['allocated']:.2f}GB allocated, {gpu_info['free']:.2f}GB free (Total: {gpu_info['total']:.2f}GB)")
         
         return metric_value
     
@@ -647,7 +792,6 @@ def run_smart_search(args):
     all_trial_results.sort(key=lambda x: x['metric_value'], reverse=True)
     
     # Save top 3 models
-    import torch
     top_n = min(3, len(all_trial_results))
     saved_model_paths = []
     
@@ -911,6 +1055,12 @@ def run_smart_search(args):
                 logger.log(f"    Saved {len(plots)} metric plots")
         
         logger.log(f"Metric tracking plots generated for top {top_n} models")
+    
+    # Stop GPU monitoring
+    if gpu_monitor:
+        gpu_monitor.stop()
+        gpu_monitor.join(timeout=5.0)
+        logger.log("\nGPU memory monitoring stopped")
     
     return 0
 
